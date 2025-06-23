@@ -5,5 +5,6 @@ enum CurrentRecordingStatus: String {
     case RECORDING
     case PAUSED
     case NONE
+    case STREAMING
 
 }

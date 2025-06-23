@@ -58,6 +58,8 @@ Add the following to your `Info.plist`:
 | pauseRecording                  | ✅       | ✅   | ✅   |
 | resumeRecording                 | ✅       | ✅   | ✅   |
 | getCurrentStatus                | ✅       | ✅   | ✅   |
+| startStreaming                  | ✅       | ✅   | ❌   |
+| stopStreaming                   | ✅       | ✅   | ❌   |
 
 ## Overview
 
@@ -222,6 +224,122 @@ VoiceRecorder.getCurrentStatus()
 | `NONE`      | Plugin is idle and waiting to start a new recording. |
 | `RECORDING` | Plugin is currently recording.                       |
 | `PAUSED`    | Recording is paused.                                 |
+| `STREAMING` | Plugin is currently streaming audio.                 |
+
+### Audio Streaming (New Feature)
+
+The plugin now supports real-time audio streaming, which is particularly useful for integrating with speech recognition services like WhisperKit.
+
+#### startStreaming
+
+Start real-time audio streaming with configurable options.
+
+```typescript
+import { VoiceRecorder } from 'capacitor-voice-recorder';
+
+// Set up listeners for audio chunks
+VoiceRecorder.addListener('audioChunk', (chunk) => {
+    console.log('Received audio chunk:', chunk);
+    // Process the audio chunk here (e.g., send to WhisperKit)
+});
+
+VoiceRecorder.addListener('streamError', (error) => {
+    console.error('Streaming error:', error);
+});
+
+// Start streaming with options
+const options = {
+    sampleRate: 16000,      // Sample rate in Hz (default: 16000 for WhisperKit)
+    channelCount: 1,        // Number of channels (default: 1 for mono)
+    encoding: 'pcm16',      // Audio encoding: 'pcm16', 'pcm8', or 'float32' (default: 'pcm16')
+    chunkDurationMs: 100    // Duration of each audio chunk in milliseconds (default: 100)
+};
+
+VoiceRecorder.startStreaming(options)
+    .then((result: GenericResponse) => console.log(result.value))
+    .catch(error => console.log(error));
+```
+
+#### stopStreaming
+
+Stop the ongoing audio streaming.
+
+```typescript
+VoiceRecorder.stopStreaming()
+    .then((result: GenericResponse) => console.log(result.value))
+    .catch(error => console.log(error));
+```
+
+#### Audio Chunk Format
+
+Each audio chunk received through the `audioChunk` event has the following structure:
+
+```typescript
+interface AudioChunk {
+    data: string;           // Base64 encoded audio data
+    timestamp: number;      // Timestamp in milliseconds since streaming started
+    duration: number;       // Duration of the chunk in milliseconds
+    format: {
+        sampleRate: number;    // Sample rate in Hz
+        channelCount: number;  // Number of audio channels
+        encoding: string;      // Audio encoding format
+    };
+}
+```
+
+#### Example: WhisperKit Integration
+
+```typescript
+import { VoiceRecorder } from 'capacitor-voice-recorder';
+
+// Convert base64 to Float32Array for WhisperKit
+function processAudioChunkForWhisperKit(chunk) {
+    // Decode base64 to binary
+    const binaryString = atob(chunk.data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+    }
+    
+    // Convert PCM16 to Float32 (WhisperKit format)
+    if (chunk.format.encoding === 'pcm16') {
+        const pcm16 = new Int16Array(bytes.buffer);
+        const float32 = new Float32Array(pcm16.length);
+        
+        for (let i = 0; i < pcm16.length; i++) {
+            float32[i] = pcm16[i] / 32768.0;
+        }
+        
+        return float32;
+    }
+    
+    return new Float32Array(bytes.buffer);
+}
+
+// Set up streaming for WhisperKit
+async function setupWhisperKitStreaming() {
+    // Request permissions first
+    const hasPermission = await VoiceRecorder.hasAudioRecordingPermission();
+    if (!hasPermission.value) {
+        await VoiceRecorder.requestAudioRecordingPermission();
+    }
+    
+    // Set up chunk listener
+    await VoiceRecorder.addListener('audioChunk', (chunk) => {
+        const audioData = processAudioChunkForWhisperKit(chunk);
+        // Send audioData to WhisperKit for transcription
+        // whisperKit.transcribe(audioData);
+    });
+    
+    // Start streaming with WhisperKit-compatible settings
+    await VoiceRecorder.startStreaming({
+        sampleRate: 16000,     // WhisperKit expects 16kHz
+        channelCount: 1,       // Mono audio
+        encoding: 'pcm16',     // 16-bit PCM
+        chunkDurationMs: 100   // 100ms chunks
+    });
+}
+```
 
 ## Format and Mime type
 

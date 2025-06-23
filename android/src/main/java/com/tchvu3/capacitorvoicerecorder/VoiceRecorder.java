@@ -6,6 +6,7 @@ import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.util.Base64;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -26,6 +27,8 @@ public class VoiceRecorder extends Plugin {
 
     static final String RECORD_AUDIO_ALIAS = "voice recording";
     private CustomMediaRecorder mediaRecorder;
+    private AudioStreamer audioStreamer;
+    private boolean isStreaming = false;
 
     @PluginMethod
     public void canDeviceVoiceRecord(PluginCall call) {
@@ -72,7 +75,7 @@ public class VoiceRecorder extends Plugin {
             return;
         }
 
-        if (mediaRecorder != null) {
+        if (mediaRecorder != null || isStreaming) {
             call.reject(Messages.ALREADY_RECORDING);
             return;
         }
@@ -164,11 +167,95 @@ public class VoiceRecorder extends Plugin {
 
     @PluginMethod
     public void getCurrentStatus(PluginCall call) {
-        if (mediaRecorder == null) {
+        if (isStreaming) {
+            call.resolve(ResponseGenerator.statusResponse(CurrentRecordingStatus.STREAMING));
+        } else if (mediaRecorder == null) {
             call.resolve(ResponseGenerator.statusResponse(CurrentRecordingStatus.NONE));
         } else {
             call.resolve(ResponseGenerator.statusResponse(mediaRecorder.getCurrentStatus()));
         }
+    }
+
+    @PluginMethod
+    public void startStreaming(PluginCall call) {
+        if (!doesUserGaveAudioRecordingPermission()) {
+            call.reject(Messages.MISSING_PERMISSION);
+            return;
+        }
+
+        if (mediaRecorder != null || isStreaming) {
+            call.reject(Messages.ALREADY_RECORDING);
+            return;
+        }
+
+        if (this.isMicrophoneOccupied()) {
+            call.reject(Messages.MICROPHONE_BEING_USED);
+            return;
+        }
+
+        // Parse streaming options
+        Integer sampleRate = call.getInt("sampleRate");
+        Integer channelCount = call.getInt("channelCount");
+        String encoding = call.getString("encoding");
+        Integer chunkDurationMs = call.getInt("chunkDurationMs");
+
+        AudioStreamer.StreamingOptions options = new AudioStreamer.StreamingOptions(
+            sampleRate != null ? sampleRate : 16000,
+            channelCount != null ? channelCount : 1,
+            encoding != null ? encoding : "pcm16",
+            chunkDurationMs != null ? chunkDurationMs : 100
+        );
+
+        audioStreamer = new AudioStreamer(options);
+        audioStreamer.setListener(new AudioStreamer.AudioStreamerListener() {
+            @Override
+            public void onAudioData(byte[] data, long timestamp, int duration, AudioStreamer.AudioStreamFormat format) {
+                JSObject chunkData = new JSObject();
+                chunkData.put("data", Base64.encodeToString(data, Base64.DEFAULT));
+                chunkData.put("timestamp", timestamp);
+                chunkData.put("duration", duration);
+                
+                JSObject formatData = new JSObject();
+                formatData.put("sampleRate", format.sampleRate);
+                formatData.put("channelCount", format.channelCount);
+                formatData.put("encoding", format.encoding);
+                chunkData.put("format", formatData);
+                
+                notifyListeners("audioChunk", chunkData);
+            }
+
+            @Override
+            public void onError(String message, String code) {
+                JSObject errorData = new JSObject();
+                errorData.put("message", message);
+                errorData.put("code", code);
+                notifyListeners("streamError", errorData);
+            }
+        });
+
+        try {
+            audioStreamer.startStreaming();
+            isStreaming = true;
+            call.resolve(ResponseGenerator.successResponse());
+        } catch (Exception e) {
+            audioStreamer = null;
+            call.reject("STREAMING_FAILED", e.getMessage(), e);
+        }
+    }
+
+    @PluginMethod
+    public void stopStreaming(PluginCall call) {
+        if (!isStreaming) {
+            call.reject("STREAMING_NOT_STARTED", "Audio streaming has not been started");
+            return;
+        }
+
+        if (audioStreamer != null) {
+            audioStreamer.stopStreaming();
+            audioStreamer = null;
+        }
+        isStreaming = false;
+        call.resolve(ResponseGenerator.successResponse());
     }
 
     private boolean doesUserGaveAudioRecordingPermission() {

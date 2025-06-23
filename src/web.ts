@@ -7,6 +7,7 @@ import type {
   RecordingData,
   RecordingOptions,
   VoiceRecorderPlugin,
+  StreamingOptions,
 } from './definitions';
 
 export class VoiceRecorderWeb extends WebPlugin implements VoiceRecorderPlugin {
@@ -42,5 +43,19 @@ export class VoiceRecorderWeb extends WebPlugin implements VoiceRecorderPlugin {
 
   public getCurrentStatus(): Promise<CurrentRecordingStatus> {
     return this.voiceRecorderInstance.getCurrentStatus();
+  }
+
+  public async startStreaming(_options?: StreamingOptions): Promise<GenericResponse> {
+    console.warn('Audio streaming is not implemented for web.');
+    return { value: false };
+  }
+
+  public async stopStreaming(): Promise<GenericResponse> {
+    console.warn('Audio streaming is not implemented for web.');
+    return { value: false };
+  }
+
+  public async removeAllListeners(): Promise<void> {
+    await super.removeAllListeners();
   }
 }
